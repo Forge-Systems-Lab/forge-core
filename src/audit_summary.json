@@ -1,0 +1,9 @@
+{
+  "system": "forge-core",
+  "version": "v0.7-beta",
+  "metrics": {
+    "rows": 2,
+    "tokens": 6,
+    "latency_sec": 0.00000254
+  }
+}

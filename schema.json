@@ -1,0 +1,9 @@
+{
+    "delimiter": ",",
+    "column_count": 3,
+    "columns": [
+        {"index": 0, "type": "int", "required": 1},
+        {"index": 1, "type": "string", "required": 0},
+        {"index": 2, "type": "string", "required": 0}
+    ]
+}
