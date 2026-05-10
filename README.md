@@ -109,7 +109,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 ## 20. Contact & Contribution
 
-Engineered for the **Solo Leveling** infrastructure mission. For architectural inquiries or performance analysis, please open a GitHub Issue.
+For architectural inquiries or performance analysis, please open a GitHub Issue.
 
 
 
