@@ -39,6 +39,8 @@ Benchmarks conducted on AVX2-compliant x86_64 architectures within a virtualized
 $$T = \frac{\text{Total Records}}{\text{Total Execution Time (seconds)}}$$
 
 At a peak of **209.08 M/s**, the system processes a single record approximately every **4.7 nanoseconds**.
+<img width="1030" height="455" alt="image" src="https://github.com/user-attachments/assets/247bc2d8-0341-43bb-8ec3-401fe1c71588" />
+
 
 ## 6. Core Architecture: Structural Indexing
 Unlike traditional parsers, Forge-Core does not "scan" for characters. It identifies the "Structural Skeleton" (delimiters and newlines) of the data first using parallel bitmasks. This allows the engine to jump through the file with mathematical certainty rather than character-by-character logic.
