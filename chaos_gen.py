@@ -1,23 +1,22 @@
 import random
 
-def generate_chaos(filename, rows=1000):
-    with open(filename, 'w') as f:
-        for i in range(rows):
-            choice = random.random()
-            
-            if choice < 0.7: # 70% Valid Data
-                f.write(f"{i},Valid_Data,Active\n")
-            
-            elif choice < 0.8: # Extra Columns (The "Overflow" Attack)
-                f.write(f"{i},Broken,Data,Extra,Fields,That,Should,Not,Be,Here\n")
-            
-            elif choice < 0.9: # Missing Columns (The "Underflow" Attack)
-                f.write(f"{i},Missing_Fields\n")
-            
-            else: # The "Nuclear" Option (Random Nulls and Long Strings)
-                garbage = "A" * 5000 # Massive row length
-                f.write(f"{i},Chaos_{garbage},Err\n")
+FILENAME = "chaos_data.csv"
+TOTAL_ROWS = 10_000_000 # Adjust based on your RAM/Disk
+POISON_COUNT = 1000
+POISON_INDICES = set(random.sample(range(TOTAL_ROWS), POISON_COUNT))
 
-if __name__ == "__main__":
-    generate_chaos("chaos_test.csv", rows=5000)
-    print("🔥 Chaos file 'chaos_test.csv' generated with 5,000 hostile rows.")
+print(f"Generating {TOTAL_ROWS} rows with {POISON_COUNT} poisoned records...")
+
+with open(FILENAME, "w") as f:
+    for i in range(TOTAL_ROWS):
+        # Column 1: ID (Integer)
+        # Column 2: Value (Integer, but sometimes poisoned)
+        if i in POISON_INDICES:
+            # Inject a non-digit 'A' into the numeric field
+            val = f"{random.randint(100, 888)}A{random.randint(10, 99)}"
+        else:
+            val = random.randint(10000, 99999)
+            
+        f.write(f"{i},{val},DATA_BLOCK_{i % 100}\n")
+
+print(f"Done. File '{FILENAME}' is ready for the Sentinel.")
