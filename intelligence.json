@@ -1,0 +1,29 @@
+{
+  "engine": "Forge-Core v4.3-STABLE",
+  "metadata": {
+    "valid_rows": 50000000,
+    "throughput_m_rows_sec": 52.26
+  },
+  "intelligence": [
+    {
+      "column": 0,
+      "type": "STR"
+    },
+    {
+      "column": 1,
+      "type": "STR"
+    },
+    {
+      "column": 2,
+      "type": "INT",
+      "metrics": {
+        "sum": 2475000000,
+        "avg": 49.50,
+        "std_dev": 28.87,
+        "volatility_index": 0.5832,
+        "min": 0,
+        "max": 99
+      }
+    }
+  ]
+}

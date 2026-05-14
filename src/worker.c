@@ -11,116 +11,68 @@
 #include <string.h>
 #include "forge.h"
 
-// --- SIMD Sentinels (Optimized Day 43 Logic) ---
-static inline uint32_t validate_chunk(__m256i chunk, __m256i v_zero, __m256i v_nine) {
-    __m256i v_bias = _mm256_sub_epi8(chunk, v_zero);
-    __m256i v_err_bytes = _mm256_subs_epu8(v_bias, v_nine);
-    __m256i v_is_digit = _mm256_cmpeq_epi8(v_err_bytes, _mm256_setzero_si256());
-    return ~_mm256_movemask_epi8(v_is_digit);
+static inline int64_t fast_parse_int(const char *start, size_t len) {
+    int64_t val = 0;
+    for (size_t i = 0; i < len; ++i) {
+        if (start[i] >= '0' && start[i] <= '9')
+            val = val * 10 + (start[i] - '0');
+    }
+    return val;
 }
 
-static inline void audit_and_attribute(uint32_t violations, uint32_t d_mask, uint32_t n_mask, 
-                                      int *current_col, uint32_t schema_mask, size_t *col_errors) {
-    int col = *current_col;
-    int last_pos = 0;
-    uint32_t separators = d_mask | n_mask;
-
-    while (separators) {
-        int pos = __builtin_ctz(separators);
-        if ((schema_mask >> col) & 1) {
-            uint32_t segment_mask = ((1U << pos) - 1) & ~((1U << last_pos) - 1);
-            col_errors[col] += __builtin_popcount(violations & segment_mask);
-        }
-        if ((d_mask >> pos) & 1) col++;
-        else { *current_col = 0; return; }
-        last_pos = pos + 1;
-        separators &= (separators - 1);
-    }
-
-    if ((schema_mask >> col) & 1) {
-        uint32_t remainder_mask = ~((1U << last_pos) - 1);
-        col_errors[col] += __builtin_popcount(violations & remainder_mask);
-    }
-    *current_col = col;
-}
-
-// --- NEW: THE WORK-STEALING LOOP ---
 void *forge_worker(void *arg) {
     ForgeThreadTask *task = (ForgeThreadTask *)arg;
-    
-    // Core Constants
-    const __m256i v_delim = _mm256_set1_epi8(task->schema->delimiter);
-    const __m256i v_newline = _mm256_set1_epi8('\n');
-    const __m256i v_zero = _mm256_set1_epi8(0x30);
-    const __m256i v_nine = _mm256_set1_epi8(9);
-    const uint32_t s_mask = task->schema->validation_mask;
-    const int target_cols = task->schema->expected_cols;
 
     while (1) {
         ForgeTask t;
         int has_work = 0;
-
-        // 1. Thread-Safe Task Pulling
         pthread_mutex_lock(&task->queue->lock);
         if (task->queue->head < task->queue->tail) {
             t = task->queue->tasks[task->queue->head++];
             has_work = 1;
         }
+        pthread_unlock:
         pthread_mutex_unlock(&task->queue->lock);
+        if (!has_work) break;
 
-        if (!has_work) break; // Queue empty, thread terminates
-
-        // 2. Local File Mapping
         int fd = open(t.filepath, O_RDONLY);
         if (fd < 0) continue;
-
         char *data = mmap(NULL, t.file_size, PROT_READ, MAP_PRIVATE, fd, 0);
         if (data == MAP_FAILED) { close(fd); continue; }
 
-        // 3. The Processing Kernel
         size_t i = 0;
-        int cur_col = 0;
-
         while (i < t.file_size) {
-            size_t line_len = 0;
-            int line_cols = 1;
-
-            while (i + line_len < t.file_size) {
-                if (i + line_len + 32 <= t.file_size) {
-                    __m256i chunk = _mm256_loadu_si256((const __m256i *)&data[i + line_len]);
-                    uint32_t n_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, v_newline));
-                    uint32_t d_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, v_delim));
-                    uint32_t violations = validate_chunk(chunk, v_zero, v_nine);
-                    
-                    int temp_col = cur_col;
-                    audit_and_attribute(violations, d_mask, n_mask, &temp_col, s_mask, task->column_errors);
-                    
-                    if (n_mask == 0) {
-                        line_cols += __builtin_popcount(d_mask);
-                        cur_col = temp_col;
-                        line_len += 32;
-                        continue;
-                    } else {
-                        int first_n = __builtin_ctz(n_mask);
-                        line_cols += __builtin_popcount(d_mask & ((1U << first_n) - 1));
-                        line_len += first_n;
-                        cur_col = 0; 
-                        break;
+            int cur_col = 0;
+            size_t col_start = i;
+            while (i < t.file_size && data[i] != '\n') {
+                if (data[i] == task->schema->delimiter) {
+                    if ((task->schema->validation_mask >> cur_col) & 1) {
+                        int64_t val = fast_parse_int(&data[col_start], i - col_start);
+                        ColumnSignal *sig = &task->thread_signals.signals[cur_col];
+                        sig->sum += (double)val;
+                        sig->sum_sq += (double)val * val; 
+                        sig->count++;
+                        if (val < sig->min) sig->min = val;
+                        if (val > sig->max) sig->max = val;
                     }
+                    cur_col++;
+                    col_start = i + 1;
                 }
-                // Fallback for file remainder
-                if (data[i + line_len] == '\n') { cur_col = 0; break; }
-                if (data[i + line_len] == task->schema->delimiter) { line_cols++; cur_col++; }
-                else if ((s_mask >> cur_col) & 1) {
-                    if (data[i + line_len] < '0' || data[i + line_len] > '9') task->column_errors[cur_col]++;
-                }
-                line_len++;
+                i++;
             }
-            task->valid_rows += (line_cols == target_cols);
-            i += line_len + 1;
+            // Last column check
+            if ((task->schema->validation_mask >> cur_col) & 1) {
+                int64_t val = fast_parse_int(&data[col_start], i - col_start);
+                ColumnSignal *sig = &task->thread_signals.signals[cur_col];
+                sig->sum += (double)val;
+                sig->sum_sq += (double)val * val;
+                sig->count++;
+                if (val < sig->min) sig->min = val;
+                if (val > sig->max) sig->max = val;
+            }
+            task->valid_rows += (cur_col + 1 == task->schema->expected_cols);
+            i++; 
         }
-
-        // 4. Cleanup after file completion
         munmap(data, t.file_size);
         close(fd);
     }
