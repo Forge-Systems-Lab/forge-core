@@ -4,12 +4,11 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <immintrin.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
-// --- SCHEMA ARCHITECTURE ---
-typedef enum {
-    TYPE_STRING = 0,
-    TYPE_INT    = 1,
-} ColType;
+#define MAX_QUEUE_SIZE 10000 
+#define MAX_PATH_LEN 512
 
 typedef struct {
     char delimiter;
@@ -17,15 +16,24 @@ typedef struct {
     uint32_t validation_mask; 
 } ForgeSchema;
 
-// --- THREADING & TELEMETRY ---
+// --- NEW: ORCHESTRATION LAYER ---
+typedef struct {
+    char filepath[MAX_PATH_LEN];
+    size_t file_size;
+} ForgeTask;
+
+typedef struct {
+    ForgeTask tasks[MAX_QUEUE_SIZE];
+    int head;             // Next task to pull
+    int tail;             // Last task added
+    int total_tasks;
+    pthread_mutex_t lock; // The synchronization gate
+} ForgeTaskQueue;
+
 typedef struct {
     int thread_id;
-    char *map_base;
-    size_t start_offset;
-    size_t end_offset;
+    ForgeTaskQueue *queue; 
     ForgeSchema *schema;
-    
-    // Telemetry: Per-column error tracking
     size_t valid_rows;
     size_t column_errors[32]; 
 } ForgeThreadTask;
