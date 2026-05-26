@@ -1,0 +1,14 @@
+# Block compiled executable binaries
+forge_init
+forge_producer
+forge_consumer
+forge_consumer_wal
+
+# Block massive physical data/WAL storage structures
+*.wal
+forge_storage.wal
+
+# Block temporary or system-specific artifacts
+*.o
+*.out
+.DS_Store
