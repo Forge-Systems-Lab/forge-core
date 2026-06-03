@@ -1,15 +1,16 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Iinclude -mavx2 -march=native -O3 -pthread
-SRC = src/main.c src/worker.c src/cli.c
+CFLAGS = -Wall -Wextra -O3 -mavx2 -march=native -pthread -Iinclude
+SRC = src/main.c src/worker.c
 OBJ = $(SRC:.c=.o)
 TARGET = forge-core
 
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ) -lm
 
-release: clean $(TARGET)
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f src/main.o src/worker.o $(TARGET)
