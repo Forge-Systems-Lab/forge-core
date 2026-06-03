@@ -2,136 +2,127 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
-#include <sys/stat.h>
 #include <pthread.h>
-#include <time.h>
-#include <math.h> // Required for sqrt()
-#include "forge.h"
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include "engine.h"
 
-void scan_directory(const char *dir_path, ForgeTaskQueue *queue) {
-    DIR *dir = opendir(dir_path);
-    if (!dir) { perror("opendir"); exit(1); }
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue;
-        if (strstr(entry->d_name, ".csv")) {
-            pthread_mutex_lock(&queue->lock);
-            if (queue->tail < MAX_QUEUE_SIZE) {
-                snprintf(queue->tasks[queue->tail].filepath, MAX_PATH_LEN, "%s/%s", dir_path, entry->d_name);
-                struct stat st;
-                stat(queue->tasks[queue->tail].filepath, &st);
-                queue->tasks[queue->tail].file_size = st.st_size;
-                queue->tail++;
-                queue->total_tasks++;
-            }
-            pthread_mutex_unlock(&queue->lock);
+#define MAX_FILES 128
+#define THREAD_COUNT 12
+
+// Expanded path headroom to 512 bytes to satisfy GCC format-truncation safety
+char file_queue[MAX_FILES][512];
+int file_count = 0;
+int next_file_idx = 0;
+
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t metrics_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+FleetMetrics global_metrics = {0};
+
+extern void parse_csv_line(const char *line, AgentTrace *trace);
+extern void accumulate_fleet_telemetry(FleetMetrics *metrics, const AgentTrace *trace);
+
+void *worker_thread_handler(void *arg) {
+    (void)arg; // Explicitly cast to silence the unused-parameter warning
+    while (1) {
+        char target_file[512] = {0};
+        
+        pthread_mutex_lock(&queue_mutex);
+        if (next_file_idx >= file_count) {
+            pthread_mutex_unlock(&queue_mutex);
+            break;
         }
-    }
-    closedir(dir);
-}
+        strncpy(target_file, file_queue[next_file_idx++], sizeof(target_file) - 1);
+        pthread_mutex_unlock(&queue_mutex);
 
-void export_intelligence_json(const char *filename, ForgeSignals *gs, ForgeSchema *schema, size_t valid_rows, double throughput) {
-    FILE *f = fopen(filename, "w");
-    if (!f) { perror("JSON Export Failed"); return; }
+        int fd = open(target_file, O_RDONLY);
+        if (fd < 0) continue;
 
-    fprintf(f, "{\n  \"engine\": \"Forge-Core v4.3-STABLE\",\n");
-    fprintf(f, "  \"metadata\": {\n    \"valid_rows\": %zu,\n    \"throughput_m_rows_sec\": %.2f\n  },\n", valid_rows, throughput);
-    fprintf(f, "  \"intelligence\": [\n");
+        struct stat sb;
+        if (fstat(fd, &sb) < 0 || sb.st_size == 0) {
+            close(fd);
+            continue;
+        }
 
-    for (int c = 0; c < schema->expected_cols; c++) {
-        fprintf(f, "    {\n      \"column\": %d,\n", c);
-        if ((schema->validation_mask >> c) & 1) {
-            double avg = gs->signals[c].count > 0 ? gs->signals[c].sum / gs->signals[c].count : 0;
-            double variance = gs->signals[c].count > 0 ? (gs->signals[c].sum_sq / gs->signals[c].count) - (avg * avg) : 0;
-            double std_dev = sqrt(variance);
+        char *file_mem = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        close(fd);
+        if (file_mem == MAP_FAILED) continue;
+
+        char *line_start = file_mem;
+        char *file_end = file_mem + sb.st_size;
+        
+        while (line_start < file_end && *line_start != '\n') line_start++;
+        if (line_start < file_end) line_start++;
+
+        char line_buffer[512];
+        while (line_start < file_end) {
+            char *line_end_ptr = line_start;
+            while (line_end_ptr < file_end && *line_end_ptr != '\n') line_end_ptr++;
             
-            fprintf(f, "      \"type\": \"INT\",\n      \"metrics\": {\n");
-            fprintf(f, "        \"sum\": %.0f,\n        \"avg\": %.2f,\n        \"std_dev\": %.2f,\n", gs->signals[c].sum, avg, std_dev);
-            fprintf(f, "        \"volatility_index\": %.4f,\n", std_dev / (avg != 0 ? avg : 1));
-            fprintf(f, "        \"min\": %ld,\n        \"max\": %ld\n      }\n", gs->signals[c].min, gs->signals[c].max);
-        } else {
-            fprintf(f, "      \"type\": \"STR\"\n");
-        }
-        fprintf(f, "    }%s\n", (c == schema->expected_cols - 1) ? "" : ",");
-    }
+            size_t line_len = line_end_ptr - line_start;
+            if (line_len > 0 && line_len < sizeof(line_buffer)) {
+                memcpy(line_buffer, line_start, line_len);
+                line_buffer[line_len] = '\0';
 
-    fprintf(f, "  ]\n}\n");
-    fclose(f);
-    printf("📄 [v4.3-STABLE] Intelligence Payload Exported: %s\n", filename);
+                AgentTrace local_trace = {0};
+                parse_csv_line(line_buffer, &local_trace);
+
+                if (local_trace.timestamp > 0) {
+                    pthread_mutex_lock(&metrics_mutex);
+                    accumulate_fleet_telemetry(&global_metrics, &local_trace);
+                    pthread_mutex_unlock(&metrics_mutex);
+                }
+            }
+            line_start = line_end_ptr + 1;
+        }
+        munmap(file_mem, sb.st_size);
+    }
+    return NULL;
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("Usage: %s <directory_path>\n", argv[0]);
+    char *target_dir = (argc > 1) ? argv[1] : "agent_telemetry";
+    DIR *dir = opendir(target_dir);
+    if (!dir) {
+        fprintf(stderr, "❌ Error: Could not open telemetry directory: %s\n", target_dir);
         return 1;
     }
 
-    ForgeTaskQueue queue = { .head = 0, .tail = 0, .total_tasks = 0 };
-    pthread_mutex_init(&queue.lock, NULL);
-    ForgeSchema schema = { .delimiter = ',', .expected_cols = 3, .validation_mask = 0x4 }; 
-
-    printf("\n🚀 [FORGE-CORE v4.3 | QUANT-READY ORCHESTRATOR]\n");
-    scan_directory(argv[1], &queue);
-
-    int num_threads = 12; 
-    pthread_t *threads = malloc(sizeof(pthread_t) * num_threads);
-    ForgeThreadTask *tasks = malloc(sizeof(ForgeThreadTask) * num_threads);
-
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-
-    for (int i = 0; i < num_threads; i++) {
-        tasks[i].thread_id = i;
-        tasks[i].queue = &queue;
-        tasks[i].schema = &schema;
-        tasks[i].valid_rows = 0;
-        memset(tasks[i].column_errors, 0, sizeof(size_t) * 32);
-
-        for(int c=0; c<32; c++) {
-            tasks[i].thread_signals.signals[c].sum = 0;
-            tasks[i].thread_signals.signals[c].sum_sq = 0;
-            tasks[i].thread_signals.signals[c].count = 0;
-            tasks[i].thread_signals.signals[c].min = 9223372036854775807LL;
-            tasks[i].thread_signals.signals[c].max = -9223372036854775807LL - 1LL;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && file_count < MAX_FILES) {
+        if (strstr(entry->d_name, ".csv")) {
+            snprintf(file_queue[file_count++], sizeof(file_queue[0]), "%s/%s", target_dir, entry->d_name);
         }
-        pthread_create(&threads[i], NULL, forge_worker, &tasks[i]);
     }
+    closedir(dir);
 
-    size_t global_valid_rows = 0;
-    ForgeSignals global_signals;
-    for(int c=0; c<32; c++) {
-        global_signals.signals[c].sum = 0;
-        global_signals.signals[c].sum_sq = 0;
-        global_signals.signals[c].count = 0;
-        global_signals.signals[c].min = 9223372036854775807LL;
-        global_signals.signals[c].max = -9223372036854775807LL - 1LL;
+    printf("⚙️  Spawning %d POSIX Threads over %d telemetry batches...\n", THREAD_COUNT, file_count);
+    pthread_t threads[THREAD_COUNT];
+    for (int i = 0; i < THREAD_COUNT; i++) {
+        pthread_create(&threads[i], NULL, worker_thread_handler, NULL);
     }
-
-    for (int i = 0; i < num_threads; i++) {
+    for (int i = 0; i < THREAD_COUNT; i++) {
         pthread_join(threads[i], NULL);
-        global_valid_rows += tasks[i].valid_rows;
-        for (int c = 0; c < 32; c++) {
-            global_signals.signals[c].sum += tasks[i].thread_signals.signals[c].sum;
-            global_signals.signals[c].sum_sq += tasks[i].thread_signals.signals[c].sum_sq;
-            global_signals.signals[c].count += tasks[i].thread_signals.signals[c].count;
-            if (tasks[i].thread_signals.signals[c].min < global_signals.signals[c].min)
-                global_signals.signals[c].min = tasks[i].thread_signals.signals[c].min;
-            if (tasks[i].thread_signals.signals[c].max > global_signals.signals[c].max)
-                global_signals.signals[c].max = tasks[i].thread_signals.signals[c].max;
-        }
     }
 
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
-    double throughput = (global_valid_rows / elapsed) / 1e6;
+    double avg_latency = global_metrics.total_records > 0 ? 
+        global_metrics.cumulative_execution_ms / global_metrics.total_records : 0.0;
 
-    printf("\n--- GLOBAL INGESTION AUDIT COMPLETE ---\n");
-    printf("✅ Total Valid Rows: %zu\n", global_valid_rows);
-    printf("📊 Global Throughput: %.2f M rows/sec\n", throughput);
+    FILE *json_file = fopen("intelligence.json", "w");
+    if (json_file) {
+        fprintf(json_file, "{\n");
+        fprintf(json_file, "  \"total_records\": %lu,\n", global_metrics.total_records);
+        fprintf(json_file, "  \"total_input_tokens\": %lu,\n", global_metrics.total_input_tokens);
+        fprintf(json_file, "  \"total_output_tokens\": %lu,\n", global_metrics.total_output_tokens);
+        fprintf(json_file, "  \"total_failures\": %lu,\n", global_metrics.total_failures);
+        fprintf(json_file, "  \"avg_execution_time_ms\": %.2f\n", avg_latency);
+        fprintf(json_file, "}\n");
+        fclose(json_file);
+        printf("📋 Data contract compiled successfully: intelligence.json written.\n");
+    }
 
-    export_intelligence_json("intelligence.json", &global_signals, &schema, global_valid_rows, throughput);
-
-    pthread_mutex_destroy(&queue.lock);
-    free(threads); free(tasks);
     return 0;
 }

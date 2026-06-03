@@ -1,16 +1,18 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -O3 -mavx2 -march=native -pthread -Iinclude
-SRC = src/main.c src/worker.c
-OBJ = $(SRC:.c=.o)
+CFLAGS = -O3 -Wall -Wextra -pthread -mavx2 -march=native -Isrc
 TARGET = forge-core
+SRCS = src/main.c src/worker.c
+OBJS = $(SRCS:.c=.o)
 
 all: $(TARGET)
 
-$(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ) -lm
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f src/main.o src/worker.o $(TARGET)
+	rm -f src/*.o $(TARGET) intelligence.json
+
+.PHONY: all clean
