@@ -79,7 +79,12 @@ The engine implements an asynchronous processing pipeline to guarantee zero late
 ⚙️ Build and Compilation
 Prerequisites
 A compiler supporting the C11 standard (GCC or Clang).
-
 Host environment featuring POSIX threads (pthread) and an AVX2-compliant CPU instruction set.
 
 Python 3.10+ installation.
+
+Execution
+To clean the local build space and compile the native core parsing utility from source coordinates, execute the build sequence:
+
+make clean
+make forge-core
