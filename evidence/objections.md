@@ -1,8 +1,8 @@
-# Forge Killer Objections & Falsification Checklist
+# Forge Killer Objections & Falsification Matrix
 
-* **Objection:** "We already use recursion limits, so our application layer is naturally capped."
-  * *Must Prove:* Legitimate enterprise workflows frequently exceed generic static caps, forcing builders to choose between application stability and cost risk.
-* **Objection:** "We just use hard provider credit limits to freeze the API keys."
-  * *Must Prove:* Freezing an entire organization's API key downstreams kills the user experience for all active, high-value paying customers to catch one broken background agent.
-* **Objection:** "This execution loop failure mode isn't a high-frequency risk in production."
-  * *Must Prove:* Complex multi-agent topologies and dynamic tool integrations create unpredictable state-space combinations that cannot be caught via standard local integration tests.
+### Objection #1: "We already use recursion_limit to cap our agent execution graphs."
+* **The Reality:** `recursion_limit` only counts framework supersteps (scheduler ticks), not model requests, tool calls, or token expenditures. Up to 77 distinct messages can regularly execute beneath a step limit of 50.
+* **The Product Wedge:** When the limit is reached, it raises a hard, unhandled language exception that tears down the user session and drops the transient graph state context, rather than providing a soft, graceful safe-mode fallback.
+
+### Objection #2: "We can just write custom step counters into our local Graph State definition."
+* **The Reality:** Forcing developers to manually inject state tracking variables, increment logic, and router conditionals into every individual node schema adds significant code maintenance overhead and fails to inspect cross-agent loop patterns.

@@ -1,18 +1,13 @@
-# Level 2/3 Evidence Tracking: Economic Loss Metrics
+# Level 2/3 Financial Leads (Needs Verification)
 
-## ⚠️ UNVERIFIED LEADS (Requires Source Verification)
+### Lead #1: The 50,000-Request Database DDoS
+* **Source Claim:** r/AI_Agents discussion thread narrative.
+* **Reported Problem:** Agent encountered a database schema exception, hallucinated parameter modifications, and fired a high-frequency retry loop.
+* **Financial Impact Claimed:** 50,000 requests sent in under 60 minutes, spiking the OpenAI API bill.
+* **Verification Status:** UNVERIFIED LEAD. No original billing invoice or source log dataset has been inspected.
 
-### Lead #1: The $4,200 Weekend Runaway
-* **Claimed Source:** Medium Post-Mortem narrative (Sattyam Jain)
-* **Reported Problem:** Agent trapped in a `429 -> replan` cycle for 63 hours over a weekend.
-* **Verification Status:** Unverified. Needs original source invoice confirmation or direct founder statement.
-
-### Lead #2: The $800 Silent Night Churn
-* **Claimed Source:** r/nocode discussion thread anecdote
-* **Reported Problem:** Autonomous script executed continuous background tool-calling actions overnight.
-* **Verification Status:** Unverified. Needs logs or screenshot confirmation.
-
-### Lead #3: The $400 Sleep Cycle
-* **Claimed Source:** r/LangChain community post
-* **Reported Problem:** Repetitive tool exception loop from Friday night to Monday morning.
-* **Verification Status:** Unverified. Needs direct builder validation.
+### Lead #2: The $24,000 Context Accumulation Bill
+* **Source Claim:** LeanOps Tech narrative.
+* **Reported Problem:** Stateful agent reasoning loops re-transmitting the entire accumulated context history on every single step.
+* **Financial Impact Claimed:** Monthly API bill peaking at $24,000.
+* **Verification Status:** UNVERIFIED LEAD. Pattern inference only; requires primary verification of original company financials.

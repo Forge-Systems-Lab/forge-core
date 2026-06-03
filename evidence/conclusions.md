@@ -1,8 +1,11 @@
-# Strategic Evaluation & Investment Case
+# Strategic Evaluation & Market Truth Scorecard
 
-### Core Truths Established:
-1. AI-agent execution failures (infinite routing, recursive tool loops) are highly documented, reproducible structural bugs in production frameworks.
-2. Existing built-in safeguards act as reactive crash gates rather than proactive out-of-band velocity controllers.
+### 🟢 Core Truths Established (Proven)
+1. Infinite loops, retry storms, and graph routing failures are common enough to appear repeatedly in primary agent framework issue trackers (LangGraph Issues #3570, #6731, #7138).
+2. Existing built-in safeguards primarily focus on reactive termination (raising unhandled application crashes) rather than proactive out-of-band containment.
+3. Observability tools provide passive historical visibility but do not provide automated runtime intervention.
 
-### Critical Metrics Missing for Business Viability:
-* **The Dollar Metric:** Hard, verified confirmation that these execution failures translate into explicit financial bleeding that teams are actively looking to budget for.
+### 🔴 Critical Unknowns (Not Proven)
+1. The actual frequency and financial severity of these incidents across early-stage companies.
+2. The willingness of engineering teams to purchase and integrate a dedicated, separate out-of-band solution.
+3. Whether current, imperfect framework controls (like static recursion limits) are simply "good enough" for most operators.
